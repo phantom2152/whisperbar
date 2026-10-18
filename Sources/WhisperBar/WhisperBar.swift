@@ -593,7 +593,7 @@ final class App: NSObject, NSApplicationDelegate {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "\(root)/build/bin/whisper-server")
         p.currentDirectoryURL = URL(fileURLWithPath: root)
-        p.arguments = ["-m", "\(root)/models/ggml-base.en.bin", "--convert",
+        p.arguments = ["-m", "\(root)/models/ggml-base.en.bin",
                        "--port", "\(port)"]
 
         let logPath = "/tmp/whisperbar.log"
