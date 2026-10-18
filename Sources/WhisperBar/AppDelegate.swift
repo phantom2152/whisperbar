@@ -41,6 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         _ = panel.view                                   // build the UI now so early updates have somewhere to land
 
+        // whisper.cpp version for the footer (runs git, so off the main thread)
+        Task { [weak self] in
+            let version = await Task.detached { WhisperInfo.versionString() }.value
+            self?.panel.setVersion(version)
+        }
+        if Settings.startServerOnLaunch { server.start() }
+
         popover.contentViewController = panel
         popover.behavior = .applicationDefined           // we decide when it closes
 

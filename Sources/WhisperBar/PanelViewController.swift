@@ -5,7 +5,7 @@ import AVFoundation
 @MainActor
 final class PanelViewController: NSViewController {
     enum Phase { case idle, recording, transcribing, done, failed }
-    enum Screen { case home, history, needsPermission, denied, granted }
+    enum Screen { case home, history, settings, needsPermission, denied, granted }
 
     // Callbacks into the app
     var onModalBusy: (@MainActor (Bool) -> Void)?          // true while a system dialog / save panel is up
@@ -24,19 +24,23 @@ final class PanelViewController: NSViewController {
     private var failText = ""
     private var note = ""
     private var requestingPermission = false
+    private var versionText = "whisper.cpp"
     private var work: Task<Void, Never>?
 
     // Screens
     private var homeStack: NSStackView!
     private var historyStack: NSStackView!
+    private var settingsStack: NSStackView!
     private var permStack: NSStackView!
     private var deniedStack: NSStackView!
     private var grantedStack: NSStackView!
 
     // Home widgets
     private let dot = NSTextField(labelWithString: "●")
-    private let statusLabel = UI.label("", size: 12, color: .secondaryLabelColor)
-    private let serverBtn = NSButton(title: "Start server", target: nil, action: nil)
+    private var powerBtn: IconButton!
+    private var copyAddressBtn: IconButton!
+    private let openBtn = NSButton(title: "Open web UI", target: nil, action: nil)
+    private let versionLabel = UI.label("whisper.cpp", size: 11, color: .tertiaryLabelColor)
     private let wave = WaveformView()
     private let message = NSTextField(wrappingLabelWithString: "")
     private let info = UI.label("", size: 12, color: .secondaryLabelColor)
@@ -50,6 +54,13 @@ final class PanelViewController: NSViewController {
     private let historyList = FlippedStackView()
     private var exportAllBtn: IconButton!
     private var clearBtn: IconButton!
+
+    // Settings widgets
+    private let modelPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let languageHint = UI.paragraph("", size: 11, color: .tertiaryLabelColor)
+    private let launchSwitch = NSSwitch()
+    private let autoCopySwitch = NSSwitch()
 
     // Permission widgets
     private let allowBtn = NSButton(title: "Allow microphone", target: nil, action: nil)
@@ -77,11 +88,12 @@ final class PanelViewController: NSViewController {
 
         buildHome()
         buildHistory()
+        buildSettings()
         buildPermission()
         buildDenied()
         buildGranted()
 
-        for s in [homeStack!, historyStack!, permStack!, deniedStack!, grantedStack!] {
+        for s in [homeStack!, historyStack!, settingsStack!, permStack!, deniedStack!, grantedStack!] {
             root.addSubview(s)
             NSLayoutConstraint.activate([
                 s.topAnchor.constraint(equalTo: root.topAnchor),
@@ -93,15 +105,25 @@ final class PanelViewController: NSViewController {
     }
 
     private func buildHome() {
+        // Header: name + status dot ........ power button
         dot.font = .systemFont(ofSize: 9)
-        let header = UI.row([UI.label("WhisperBar", size: 15, weight: .semibold), UI.spacer(), dot, statusLabel],
-                            spacing: 5)
+        powerBtn = IconButton(symbol: "power", tooltip: "Start server", side: 30, symbolSize: 15,
+                              target: self, action: #selector(serverTapped))
+        let header = UI.row([UI.label("WhisperBar", size: 15, weight: .semibold), dot, UI.spacer(), powerBtn],
+                            spacing: 6)
 
-        serverBtn.target = self
-        serverBtn.action = #selector(serverTapped)
-        serverBtn.bezelStyle = .rounded
-        serverBtn.imagePosition = .imageLeading
-        UI.fixedWidth(serverBtn)
+        // Address: localhost:9458 [copy] ........ Open web UI
+        let address = UI.label("localhost:\(Config.port)", size: 12, color: .secondaryLabelColor)
+        copyAddressBtn = IconButton(symbol: "doc.on.doc", tooltip: "Copy server address", side: 22, symbolSize: 11,
+                                    target: self, action: #selector(copyAddressTapped))
+        openBtn.target = self
+        openBtn.action = #selector(openWebUITapped)
+        openBtn.isBordered = false
+        openBtn.attributedTitle = NSAttributedString(string: "Open web UI", attributes: [
+            .foregroundColor: NSColor.controlAccentColor,
+            .font: NSFont.systemFont(ofSize: 13),
+        ])
+        let addressRow = UI.row([address, copyAddressBtn, UI.spacer(), openBtn], spacing: 4)
 
         // One fixed slot: waveform while recording, text otherwise
         let slot = UI.fixedWidth(NSView())
@@ -140,14 +162,17 @@ final class PanelViewController: NSViewController {
         info.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         let controls = UI.row([recBtn, discardBtn, info, copyBtn, exportBtn, historyBtn], spacing: 6)
 
-        let foot = UI.label("localhost:\(Config.port)", size: 11, color: .tertiaryLabelColor)
+        // Footer: whisper.cpp version ........ log · settings · quit
+        versionLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         let logBtn = IconButton(symbol: "doc.text.magnifyingglass", tooltip: "Open server log",
                                 side: 24, symbolSize: 12, target: self, action: #selector(openLogTapped))
+        let settingsBtn = IconButton(symbol: "gearshape", tooltip: "Settings",
+                                     side: 24, symbolSize: 12, target: self, action: #selector(settingsTapped))
         let quitBtn = IconButton(symbol: "xmark.circle", tooltip: "Quit WhisperBar",
                                  side: 24, symbolSize: 12, target: self, action: #selector(quitTapped))
-        let footer = UI.row([foot, UI.spacer(), logBtn, quitBtn], spacing: 4)
+        let footer = UI.row([versionLabel, UI.spacer(), logBtn, settingsBtn, quitBtn], spacing: 4)
 
-        homeStack = UI.column([header, serverBtn, UI.separator(), slot, controls, UI.separator(), footer])
+        homeStack = UI.column([header, addressRow, UI.separator(), slot, controls, UI.separator(), footer])
     }
 
     private func buildHistory() {
@@ -179,6 +204,47 @@ final class PanelViewController: NSViewController {
         ])
 
         historyStack = UI.column([header, UI.separator(), scroll])
+    }
+
+    private func buildSettings() {
+        modelPopup.target = self
+        modelPopup.action = #selector(modelChanged)
+        UI.fixedWidth(modelPopup)
+        languagePopup.target = self
+        languagePopup.action = #selector(languageChanged)
+        UI.fixedWidth(languagePopup)
+        for l in Languages.all {
+            languagePopup.addItem(withTitle: l.name)
+            languagePopup.lastItem?.representedObject = l.code
+        }
+        launchSwitch.target = self
+        launchSwitch.action = #selector(launchToggled)
+        autoCopySwitch.target = self
+        autoCopySwitch.action = #selector(autoCopyToggled)
+
+        let launchRow = UI.row([UI.label("Start server on launch"), UI.spacer(), launchSwitch], spacing: 8)
+        let copyRow = UI.row([UI.label("Copy transcripts automatically"), UI.spacer(), autoCopySwitch], spacing: 8)
+
+        let folderBtn = NSButton(title: "Show models folder", target: self, action: #selector(showModelsFolderTapped))
+        folderBtn.bezelStyle = .rounded
+        folderBtn.image = Symbols.image("folder", size: 12)
+        folderBtn.imagePosition = .imageLeading
+
+        settingsStack = UI.column([
+            backRow("Settings"),
+            UI.separator(),
+            UI.label("Model", size: 12, color: .secondaryLabelColor),
+            modelPopup,
+            UI.label("Language", size: 12, color: .secondaryLabelColor),
+            languagePopup,
+            languageHint,
+            UI.separator(),
+            launchRow,
+            copyRow,
+            UI.separator(),
+            UI.paragraph("Changing the model or language restarts the server.", size: 11, color: .tertiaryLabelColor),
+            folderBtn,
+        ])
     }
 
     private func backRow(_ title: String) -> NSView {
@@ -223,26 +289,28 @@ final class PanelViewController: NSViewController {
 
         homeStack.isHidden = screen != .home
         historyStack.isHidden = screen != .history
+        settingsStack.isHidden = screen != .settings
         permStack.isHidden = screen != .needsPermission
         deniedStack.isHidden = screen != .denied
         grantedStack.isHidden = screen != .granted
 
-        // Server header + button
+        // Server header: dot + power button
         switch server.state {
         case .stopped:
-            dot.textColor = .tertiaryLabelColor; statusLabel.stringValue = "Stopped"
-            serverBtn.title = "Start server"; serverBtn.isEnabled = true
+            dot.isHidden = true
+            powerBtn.setTint(.secondaryLabelColor); powerBtn.toolTip = "Start server"; powerBtn.isEnabled = true
         case .starting:
-            dot.textColor = .systemOrange; statusLabel.stringValue = "Starting…"
-            serverBtn.title = "Stop server"; serverBtn.isEnabled = true
+            dot.isHidden = false; dot.textColor = .systemOrange
+            powerBtn.setTint(.systemOrange); powerBtn.toolTip = "Stop server"; powerBtn.isEnabled = true
         case .ready:
-            dot.textColor = .systemGreen; statusLabel.stringValue = "Ready"
-            serverBtn.title = "Stop server"; serverBtn.isEnabled = true
+            dot.isHidden = false; dot.textColor = .systemGreen
+            powerBtn.setTint(.systemGreen); powerBtn.toolTip = "Stop server"; powerBtn.isEnabled = true
         case .stopping:
-            dot.textColor = .systemOrange; statusLabel.stringValue = "Stopping…"
-            serverBtn.title = "Stopping…"; serverBtn.isEnabled = false
+            dot.isHidden = false; dot.textColor = .systemOrange
+            powerBtn.setTint(.systemOrange); powerBtn.toolTip = "Stopping…"; powerBtn.isEnabled = false
         }
-        serverBtn.image = Symbols.image(server.state == .stopped ? "power" : "stop.fill", size: 12)
+        openBtn.isEnabled = server.state == .ready
+        openBtn.alphaValue = server.state == .ready ? 1 : 0.35
 
         // Recorder
         let recording = phase == .recording
@@ -276,7 +344,7 @@ final class PanelViewController: NSViewController {
                 message.stringValue = problem
                 message.textColor = .systemRed
             } else {
-                message.stringValue = server.state == .ready ? "Press the mic, then speak." : "Start the server to begin."
+                message.stringValue = server.state == .ready ? "Press the mic, then speak." : "Start the server (top right) to begin."
                 message.textColor = .secondaryLabelColor
             }
         }
@@ -312,6 +380,7 @@ final class PanelViewController: NSViewController {
         switch screen {
         case .home: current = homeStack
         case .history: current = historyStack
+        case .settings: current = settingsStack
         case .needsPermission: current = permStack
         case .denied: current = deniedStack
         case .granted: current = grantedStack
@@ -335,6 +404,12 @@ final class PanelViewController: NSViewController {
         render()
     }
 
+    func setVersion(_ v: String) {
+        versionText = "whisper.cpp \(v)"
+        versionLabel.stringValue = versionText
+        versionLabel.toolTip = versionText
+    }
+
     /// Reopening the tile always lands on the home screen (unless the system dialog is up).
     func prepareForOpen() {
         guard !requestingPermission, screen != .home else { return }
@@ -355,6 +430,72 @@ final class PanelViewController: NSViewController {
     @objc private func quitTapped() { onQuit?() }
     @objc private func backTapped() { go(.home) }
     @objc private func historyTapped() { go(.history) }
+    @objc private func settingsTapped() { refreshSettings(); go(.settings) }
+
+    @objc private func copyAddressTapped() {
+        copyToPasteboard("http://localhost:\(Config.port)")
+        copyAddressBtn.setSymbol("checkmark")
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            self?.copyAddressBtn.setSymbol("doc.on.doc")
+        }
+    }
+
+    @objc private func openWebUITapped() {
+        if let url = URL(string: "http://localhost:\(Config.port)/") { NSWorkspace.shared.open(url) }
+    }
+
+    // MARK: Settings
+
+    private func refreshSettings() {
+        var models = ModelCatalog.scan()
+        let current = Settings.modelPath
+        if !models.contains(where: { $0.path == current }) {
+            models.insert(ModelInfo(path: current, name: ModelCatalog.displayName(for: current), size: ""), at: 0)
+        }
+        modelPopup.removeAllItems()
+        for m in models {
+            modelPopup.addItem(withTitle: m.size.isEmpty ? m.name : "\(m.name)  ·  \(m.size)")
+            modelPopup.lastItem?.representedObject = m.path
+        }
+        if let i = models.firstIndex(where: { $0.path == current }) { modelPopup.selectItem(at: i) }
+
+        refreshLanguage()
+        launchSwitch.state = Settings.startServerOnLaunch ? .on : .off
+        autoCopySwitch.state = Settings.autoCopy ? .on : .off
+    }
+
+    private func refreshLanguage() {
+        let englishOnly = ModelCatalog.isEnglishOnly(Settings.modelPath)
+        let code = englishOnly ? "en" : Settings.language
+        if let i = Languages.all.firstIndex(where: { $0.code == code }) { languagePopup.selectItem(at: i) }
+        languagePopup.isEnabled = !englishOnly
+        languageHint.isHidden = !englishOnly
+        languageHint.stringValue = "English-only model. Pick one without “.en” in its name for other languages."
+        updateSize()
+    }
+
+    @objc private func modelChanged() {
+        guard let path = modelPopup.selectedItem?.representedObject as? String,
+              path != Settings.modelPath else { return }
+        Settings.modelPath = path
+        server.restartIfRunning()
+        refreshLanguage()
+    }
+
+    @objc private func languageChanged() {
+        guard let code = languagePopup.selectedItem?.representedObject as? String,
+              code != Settings.language else { return }
+        Settings.language = code
+        server.restartIfRunning()
+    }
+
+    @objc private func launchToggled() { Settings.startServerOnLaunch = launchSwitch.state == .on }
+    @objc private func autoCopyToggled() { Settings.autoCopy = autoCopySwitch.state == .on }
+
+    @objc private func showModelsFolderTapped() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: Config.modelsDirectory))
+    }
     @objc private func openLogTapped() { NSWorkspace.shared.open(URL(fileURLWithPath: Config.logPath)) }
 
     @objc private func openSettingsTapped() {
@@ -494,9 +635,9 @@ final class PanelViewController: NSViewController {
 
         let t = store.add(text: text, duration: duration)
         latest = t
-        copyToPasteboard(text)
+        if Settings.autoCopy { copyToPasteboard(text) }
         phase = .done
-        note = String(format: "Done in %.1fs · copied", took)
+        note = String(format: "Done in %.1fs", took) + (Settings.autoCopy ? " · copied" : "")
         render()
     }
 

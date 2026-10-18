@@ -13,7 +13,8 @@ certificate in Keychain Access, then `SIGN_ID="Your Cert Name" ./build.sh`.
 
 ## Configure
 
-Paths, port and history size are all in `Sources/WhisperBar/Config.swift`.
+Paths, port and history size: `Sources/WhisperBar/Config.swift`.
+Model, language, start-on-launch and auto-copy: the gear icon in the tile.
 
 ## Layout
 
@@ -30,7 +31,9 @@ Paths, port and history size are all in `Sources/WhisperBar/Config.swift`.
       Components.swift           IconButton, layout + format helpers
       MenuBarIcon.swift          menu bar glyph drawn in code (off / ready / recording)
       WaveformView.swift         live level meter
-      Config.swift
+      Config.swift               fixed paths + defaults
+      Settings.swift             saved choices (model, language, …) + model scanner
+      WhisperInfo.swift          reads the whisper.cpp version for the footer
     Resources/                   AppIcon.icns, AppIcon-1024.png, icon-preview.png
     Tools/make_icon.py           regenerates the icons (pip install pillow numpy)
 

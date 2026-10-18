@@ -11,6 +11,7 @@ final class ServerController {
 
     private var process: Process?
     private var logHandle: FileHandle?
+    private var restartPending = false
 
     // MARK: Control
 
@@ -28,16 +29,19 @@ final class ServerController {
         guard fm.isExecutableFile(atPath: Config.serverBinary) else {
             return apply(.stopped, problem: "whisper-server not found:\n\(Config.serverBinary)")
         }
-        guard fm.fileExists(atPath: Config.modelPath) else {
-            return apply(.stopped, problem: "Model not found:\n\(Config.modelPath)")
+        let model = Settings.modelPath
+        guard fm.fileExists(atPath: model) else {
+            return apply(.stopped, problem: "Model not found:\n\(model)")
         }
         killStrays()
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: Config.serverBinary)
         p.currentDirectoryURL = URL(fileURLWithPath: Config.whisperRoot)
-        p.arguments = ["-m", Config.modelPath, "--port", "\(Config.port)"]
-                        + Config.extraServerArguments.filter { !$0.isEmpty }
+        // “.en” models only speak English, so never pass them another language
+        let language = ModelCatalog.isEnglishOnly(model) ? "en" : Settings.language
+        p.arguments = ["-m", model, "--port", "\(Config.port)", "-l", language]
+            + Config.extraServerArguments.filter { !$0.isEmpty }
 
         // Log to a file instead of inheriting a terminal
         fm.createFile(atPath: Config.logPath, contents: nil)
@@ -75,6 +79,13 @@ final class ServerController {
         }
     }
 
+    /// Applies a changed model/language: stop, then start again once the old process is gone.
+    func restartIfRunning() {
+        guard state == .starting || state == .ready else { return }
+        restartPending = true
+        stop()
+    }
+
     /// Used on app quit: no waiting around.
     func terminateNow() {
         if let p = process, p.isRunning { kill(p.processIdentifier, SIGKILL) }
@@ -100,10 +111,13 @@ final class ServerController {
     private func handleExit(pid: Int32) {
         guard process?.processIdentifier == pid else { return }      // stale process, ignore
         let unexpected = state == .starting || state == .ready
+        let restart = restartPending
+        restartPending = false
         process = nil
         try? logHandle?.close()
         logHandle = nil
         apply(.stopped, problem: unexpected ? "The server exited unexpectedly.\nOpen the log for details." : nil)
+        if restart { start() }
     }
 
     /// The model takes a moment to load: flip to "ready" once the port answers.

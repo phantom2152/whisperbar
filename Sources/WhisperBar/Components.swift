@@ -150,6 +150,9 @@ final class IconButton: NSButton {
         refreshBackground()
     }
 
+    /// Colors the symbol (for buttons without a solid fill).
+    func setTint(_ color: NSColor) { contentTintColor = color }
+
     override var isEnabled: Bool {
         didSet { alphaValue = isEnabled ? 1 : 0.35; refreshBackground() }
     }
