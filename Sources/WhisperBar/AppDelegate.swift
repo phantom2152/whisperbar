@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clickMonitor: Any?
     private var keyMonitor: Any?
     private var autoCloseSuspended = false  // true while a system dialog / save panel is up
+    private var reopenAfterDialog = false  // tile was open when one of our dialogs appeared
     private var isRecording = false
     private var isShuttingDown = false  // graceful quit in progress
     private var quitReplied = false  // reply(toApplicationShouldTerminate:) must be sent only once
@@ -35,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel = PanelViewController(server: server, store: store)
         panel.onQuit = { NSApp.terminate(nil) }
         panel.onModalBusy = { [weak self] busy in self?.autoCloseSuspended = busy }
+        panel.onDialog = { [weak self] showing in self?.dialogChanged(showing) }
         panel.onRecordingChange = { [weak self] recording in
             self?.isRecording = recording
             self?.updateIcon()
@@ -111,6 +113,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         item.button?.image = MenuBarIcon.image(state)
         item.button?.toolTip = "WhisperBar"
+    }
+
+    // MARK: Tile vs. our own dialogs
+
+    /// macOS draws the popover above runModal() dialogs, so hide the tile while one is up and bring it back after.
+    /// The click/Esc monitors stay installed; `autoCloseSuspended` keeps them from reacting meanwhile.
+    private func dialogChanged(_ showing: Bool) {
+        autoCloseSuspended = showing
+        if showing {
+            reopenAfterDialog = popover.isShown
+            popover.close()  // immediate, no animation
+        } else if reopenAfterDialog, let button = item.button {
+            reopenAfterDialog = false
+            NSApp.activate(ignoringOtherApps: true)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
     }
 
     // MARK: Tile open / close

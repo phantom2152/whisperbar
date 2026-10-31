@@ -1,12 +1,17 @@
 import Foundation
 
-/// Fixed paths and defaults. User-changeable options (model, language, …) live in Settings.swift.
+/// Fixed defaults. Folders the user can change in Settings are resolved through Settings.swift.
 enum Config {
-    static let whisperRoot = "/Users/anishgowda/playground/ThirdParty/whisper.cpp"
-    static let serverBinary = whisperRoot + "/build/bin/whisper-server"
-    static let modelsDirectory = whisperRoot + "/models"
-    static let defaultModelPath = modelsDirectory + "/ggml-base.en.bin"
-    static let extraServerArguments: [String] = []      // e.g. ["--convert"] if you ever send non-WAV audio
+    /// Used until the user picks a different whisper.cpp folder in Settings.
+    static let defaultWhisperRoot = "/Users/anishgowda/playground/ThirdParty/whisper.cpp"
+
+    // Resolved from Settings, so the rest of the app doesn't care where these come from.
+    static var whisperRoot: String { Settings.whisperRoot }
+    static var serverBinary: String { whisperRoot + "/build/bin/whisper-server" }
+    static var modelsDirectory: String { Settings.modelsDirectory }
+    static var defaultModelPath: String { modelsDirectory + "/ggml-base.en.bin" }
+
+    static let extraServerArguments: [String] = []  // e.g. ["--convert"] if you ever send non-WAV audio
     static let port = 9458
     static let logPath = "/tmp/whisperbar.log"
     static let historyLimit = 100

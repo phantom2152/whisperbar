@@ -9,6 +9,7 @@ final class PanelViewController: NSViewController {
 
     // Callbacks into the app
     var onModalBusy: (@MainActor (Bool) -> Void)?  // true while a system dialog / save panel is up
+    var onDialog: (@MainActor (Bool) -> Void)?  // true while one of our own dialogs is up (tile hides meanwhile)
     var onRecordingChange: (@MainActor (Bool) -> Void)?
     var onQuit: (@MainActor () -> Void)?
 
@@ -59,6 +60,9 @@ final class PanelViewController: NSViewController {
     private let modelPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let languageHint = UI.paragraph("", size: 11, color: .tertiaryLabelColor)
+    private let rootPathLabel = UI.label("", size: 11, color: .secondaryLabelColor)
+    private let modelsPathLabel = UI.label("", size: 11, color: .secondaryLabelColor)
+    private let pathHint = UI.paragraph("", size: 11, color: .systemRed)
     private let launchSwitch = NSSwitch()
     private let autoCopySwitch = NSSwitch()
 
@@ -75,7 +79,7 @@ final class PanelViewController: NSViewController {
         recorder.onTick = { [weak self] level, elapsed in self?.tick(level: level, elapsed: elapsed)
         }
         store.onChange = { [weak self] in self?.storeChanged() }
-        exporter.onBusy = { [weak self] busy in self?.onModalBusy?(busy) }
+        exporter.onBusy = { [weak self] busy in self?.onDialog?(busy) }
         exporter.onResult = { [weak self] text in
             self?.note = text
             self?.render()
@@ -258,11 +262,29 @@ final class PanelViewController: NSViewController {
         let copyRow = UI.row(
             [UI.label("Copy transcripts automatically"), UI.spacer(), autoCopySwitch], spacing: 8)
 
-        let folderBtn = NSButton(
-            title: "Show models folder", target: self, action: #selector(showModelsFolderTapped))
-        folderBtn.bezelStyle = .rounded
-        folderBtn.image = Symbols.image("folder", size: 12)
-        folderBtn.imagePosition = .imageLeading
+        for l in [rootPathLabel, modelsPathLabel] {
+            l.lineBreakMode = .byTruncatingMiddle
+            l.setContentCompressionResistancePriority(
+                NSLayoutConstraint.Priority(1), for: .horizontal)
+        }
+        let rootChoose = IconButton(
+            symbol: "folder", tooltip: "Choose whisper.cpp folder…", side: 24, symbolSize: 12,
+            target: self, action: #selector(chooseRootTapped))
+        let modelsChoose = IconButton(
+            symbol: "folder", tooltip: "Choose models folder…", side: 24, symbolSize: 12,
+            target: self, action: #selector(chooseModelsTapped))
+        let modelsReveal = IconButton(
+            symbol: "arrow.up.forward.square", tooltip: "Show in Finder", side: 24, symbolSize: 12,
+            target: self, action: #selector(showModelsFolderTapped))
+        let rootRow = UI.row([rootPathLabel, UI.spacer(), rootChoose], spacing: 4)
+        let modelsRow = UI.row(
+            [modelsPathLabel, UI.spacer(), modelsReveal, modelsChoose], spacing: 4)
+
+        let resetBtn = NSButton(
+            title: "Reset folders", target: self, action: #selector(resetPathsTapped))
+        resetBtn.bezelStyle = .rounded
+        resetBtn.image = Symbols.image("arrow.counterclockwise", size: 12)
+        resetBtn.imagePosition = .imageLeading
 
         settingsStack = UI.column([
             backRow("Settings"),
@@ -276,10 +298,15 @@ final class PanelViewController: NSViewController {
             launchRow,
             copyRow,
             UI.separator(),
+            UI.label("whisper.cpp folder", size: 12, color: .secondaryLabelColor),
+            rootRow,
+            UI.label("Models folder", size: 12, color: .secondaryLabelColor),
+            modelsRow,
+            pathHint,
+            resetBtn,
             UI.paragraph(
-                "Changing the model or language restarts the server.", size: 11,
+                "Changing the model, language or folders restarts the server.", size: 11,
                 color: .tertiaryLabelColor),
-            folderBtn,
         ])
     }
 
@@ -540,6 +567,7 @@ final class PanelViewController: NSViewController {
         refreshLanguage()
         launchSwitch.state = Settings.startServerOnLaunch ? .on : .off
         autoCopySwitch.state = Settings.autoCopy ? .on : .off
+        refreshPaths()
     }
 
     private func refreshLanguage() {
@@ -578,6 +606,89 @@ final class PanelViewController: NSViewController {
     @objc private func showModelsFolderTapped() {
         NSWorkspace.shared.open(URL(fileURLWithPath: Config.modelsDirectory))
     }
+    // MARK: Folders
+
+    private func refreshPaths() {
+        rootPathLabel.stringValue = (Settings.whisperRoot as NSString).abbreviatingWithTildeInPath
+        rootPathLabel.toolTip = Settings.whisperRoot
+        modelsPathLabel.stringValue =
+            (Settings.modelsDirectory as NSString).abbreviatingWithTildeInPath
+        modelsPathLabel.toolTip = Settings.modelsDirectory
+
+        var problems: [String] = []
+        if !FileManager.default.isExecutableFile(atPath: Config.serverBinary) {
+            problems.append("whisper-server not found at build/bin/ in this folder.")
+        }
+        if ModelCatalog.scan().isEmpty {
+            problems.append("No ggml-*.bin models in the models folder.")
+        }
+        pathHint.stringValue = problems.joined(separator: "\n")
+        pathHint.isHidden = problems.isEmpty
+        updateSize()
+    }
+
+    @objc private func chooseRootTapped() {
+        guard
+            let url = pickFolder(
+                title: "Choose your whisper.cpp folder", start: Settings.whisperRoot)
+        else { return }
+        Settings.whisperRoot = url.path
+        pathsChanged()
+    }
+
+    @objc private func chooseModelsTapped() {
+        guard
+            let url = pickFolder(
+                title: "Choose the folder with your ggml models", start: Settings.modelsDirectory)
+        else { return }
+        Settings.modelsDirectory = url.path
+        pathsChanged()
+    }
+
+    @objc private func resetPathsTapped() {
+        Settings.resetPaths()
+        pathsChanged()
+    }
+
+    private func pickFolder(title: String, start: String) -> URL? {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.prompt = "Choose"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: start, isDirectory: true)
+
+        onDialog?(true)  // tile hides while the dialog is up
+        NSApp.activate(ignoringOtherApps: true)
+        let response = panel.runModal()
+        onDialog?(false)
+        return response == .OK ? panel.url : nil
+    }
+
+    /// A folder changed: make sure the selected model still exists in the models folder, then apply.
+    private func pathsChanged() {
+        let fm = FileManager.default
+        let dir = URL(fileURLWithPath: Settings.modelsDirectory).standardizedFileURL.path
+        let current = URL(fileURLWithPath: Settings.modelPath).standardizedFileURL
+        if current.deletingLastPathComponent().path != dir || !fm.fileExists(atPath: current.path) {
+            let candidates = [Config.defaultModelPath] + ModelCatalog.scan().map(\.path)
+            if let ok = candidates.first(where: { fm.fileExists(atPath: $0) }) {
+                Settings.modelPath = ok
+            }
+        }
+        server.restartIfRunning()
+        refreshVersion()
+        refreshSettings()
+    }
+
+    private func refreshVersion() {
+        Task { [weak self] in
+            let version = await Task.detached { WhisperInfo.versionString() }.value
+            self?.setVersion(version)
+        }
+    }
+
     @objc private func openLogTapped() {
         NSWorkspace.shared.open(URL(fileURLWithPath: Config.logPath))
     }
@@ -615,10 +726,10 @@ final class PanelViewController: NSViewController {
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
 
-        onModalBusy?(true)
+        onDialog?(true)
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
-        onModalBusy?(false)
+        onDialog?(false)
         if response == .alertFirstButtonReturn { store.clear() }
     }
 

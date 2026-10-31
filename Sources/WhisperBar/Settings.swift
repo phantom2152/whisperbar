@@ -2,6 +2,23 @@ import Foundation
 
 /// Persisted user choices (UserDefaults).
 enum Settings {
+    /// The whisper.cpp checkout. Also the server's working directory (it likely finds its web UI files relative to it).
+    static var whisperRoot: String {
+        get { UserDefaults.standard.string(forKey: "whisperRoot") ?? Config.defaultWhisperRoot }
+        set { UserDefaults.standard.set(newValue, forKey: "whisperRoot") }
+    }
+
+    /// Where the ggml-*.bin models live. Follows "<whisper.cpp folder>/models" until you pick one.
+    static var modelsDirectory: String {
+        get { UserDefaults.standard.string(forKey: "modelsDirectory") ?? (whisperRoot + "/models") }
+        set { UserDefaults.standard.set(newValue, forKey: "modelsDirectory") }
+    }
+
+    static func resetPaths() {
+        UserDefaults.standard.removeObject(forKey: "whisperRoot")
+        UserDefaults.standard.removeObject(forKey: "modelsDirectory")
+    }
+
     static var modelPath: String {
         get { UserDefaults.standard.string(forKey: "modelPath") ?? Config.defaultModelPath }
         set { UserDefaults.standard.set(newValue, forKey: "modelPath") }
@@ -56,18 +73,25 @@ enum ModelCatalog {
     static func scan() -> [ModelInfo] {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(atPath: Config.modelsDirectory)) ?? []
-        let found: [(info: ModelInfo, bytes: Int64)] = files
-            .filter { $0.hasPrefix("ggml-") && $0.hasSuffix(".bin")
-                      && !$0.contains("silero") && !$0.contains("for-tests") }
+        let found: [(info: ModelInfo, bytes: Int64)] =
+            files
+            .filter {
+                $0.hasPrefix("ggml-") && $0.hasSuffix(".bin")
+                    && !$0.contains("silero") && !$0.contains("for-tests")
+            }
             .map { file in
                 let path = Config.modelsDirectory + "/" + file
                 let attrs = try? fm.attributesOfItem(atPath: path)
                 let bytes = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-                let size = bytes > 0 ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : ""
+                let size =
+                    bytes > 0
+                    ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : ""
                 return (ModelInfo(path: path, name: displayName(for: path), size: size), bytes)
             }
-        return found.sorted { $0.bytes != $1.bytes ? $0.bytes < $1.bytes : $0.info.name < $1.info.name }
-            .map { $0.info }
+        return found.sorted {
+            $0.bytes != $1.bytes ? $0.bytes < $1.bytes : $0.info.name < $1.info.name
+        }
+        .map { $0.info }
     }
 
     /// "/…/ggml-base.en.bin" → "base.en"
