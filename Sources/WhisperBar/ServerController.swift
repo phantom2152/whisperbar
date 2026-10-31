@@ -12,6 +12,10 @@ final class ServerController {
     private var process: Process?
     private var logHandle: FileHandle?
     private var restartPending = false
+    private var shutdownCompletions: [@MainActor () -> Void] = []
+
+    /// true while a whisper-server child process is alive
+    var isProcessAlive: Bool { process?.isRunning == true }
 
     // MARK: Control
 
@@ -40,7 +44,8 @@ final class ServerController {
         p.currentDirectoryURL = URL(fileURLWithPath: Config.whisperRoot)
         // “.en” models only speak English, so never pass them another language
         let language = ModelCatalog.isEnglishOnly(model) ? "en" : Settings.language
-        p.arguments = ["-m", model, "--port", "\(Config.port)", "-l", language]
+        p.arguments =
+            ["-m", model, "--port", "\(Config.port)", "-l", language]
             + Config.extraServerArguments.filter { !$0.isEmpty }
 
         // Log to a file instead of inheriting a terminal
@@ -62,7 +67,8 @@ final class ServerController {
             apply(.starting)
             waitUntilReady(pid: p.processIdentifier)
         } catch {
-            try? logHandle?.close(); logHandle = nil
+            try? logHandle?.close()
+            logHandle = nil
             apply(.stopped, problem: "Couldn’t start the server: \(error.localizedDescription)")
         }
     }
@@ -71,11 +77,13 @@ final class ServerController {
         guard let p = process, p.isRunning else { return }
         let pid = p.processIdentifier
         apply(.stopping)
-        p.terminate()                                   // SIGTERM (graceful)
+        p.terminate()  // SIGTERM (graceful)
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            guard let self, let p = self.process, p.processIdentifier == pid, p.isRunning else { return }
-            kill(pid, SIGKILL)                          // still alive: force
+            guard let self, let p = self.process, p.processIdentifier == pid, p.isRunning else {
+                return
+            }
+            kill(pid, SIGKILL)  // still alive: force
         }
     }
 
@@ -86,7 +94,20 @@ final class ServerController {
         stop()
     }
 
-    /// Used on app quit: no waiting around.
+    /// Used on a normal app quit: stops the server gracefully (state goes to .stopping, so the UI can
+    /// show it turning off) and calls `completion` once the process is really gone.
+    /// If no process is alive, `completion` runs immediately. Never restarts the server afterwards.
+    func shutDown(completion: @escaping @MainActor () -> Void) {
+        restartPending = false
+        guard isProcessAlive else {
+            completion()
+            return
+        }
+        shutdownCompletions.append(completion)
+        if state != .stopping { stop() }
+    }
+
+    /// Last-resort kill (used if a graceful shutdown takes too long).
     func terminateNow() {
         if let p = process, p.isRunning { kill(p.processIdentifier, SIGKILL) }
     }
@@ -109,14 +130,20 @@ final class ServerController {
     }
 
     private func handleExit(pid: Int32) {
-        guard process?.processIdentifier == pid else { return }      // stale process, ignore
+        guard process?.processIdentifier == pid else { return }  // stale process, ignore
         let unexpected = state == .starting || state == .ready
         let restart = restartPending
         restartPending = false
         process = nil
         try? logHandle?.close()
         logHandle = nil
-        apply(.stopped, problem: unexpected ? "The server exited unexpectedly.\nOpen the log for details." : nil)
+        apply(
+            .stopped,
+            problem: unexpected ? "The server exited unexpectedly.\nOpen the log for details." : nil
+        )
+        let done = shutdownCompletions
+        shutdownCompletions = []
+        for completion in done { completion() }
         if restart { start() }
     }
 
@@ -137,6 +164,6 @@ final class ServerController {
     nonisolated private static func probe() async -> Bool {
         var req = URLRequest(url: URL(string: "http://127.0.0.1:\(Config.port)/")!)
         req.timeoutInterval = 1
-        return (try? await URLSession.shared.data(for: req)) != nil   // any HTTP reply = up
+        return (try? await URLSession.shared.data(for: req)) != nil  // any HTTP reply = up
     }
 }

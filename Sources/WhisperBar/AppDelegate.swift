@@ -12,8 +12,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     private var clickMonitor: Any?
     private var keyMonitor: Any?
-    private var autoCloseSuspended = false      // true while a system dialog / save panel is up
+    private var autoCloseSuspended = false  // true while a system dialog / save panel is up
     private var isRecording = false
+    private var isShuttingDown = false  // graceful quit in progress
+    private var quitReplied = false  // reply(toApplicationShouldTerminate:) must be sent only once
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         server.killStrays()
@@ -24,8 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.action = #selector(statusClicked)
             _ = button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        quitMenu.addItem(NSMenuItem(title: "Quit WhisperBar", action: #selector(NSApplication.terminate(_:)),
-                                    keyEquivalent: "q"))
+        quitMenu.addItem(
+            NSMenuItem(
+                title: "Quit WhisperBar", action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q"))
         updateIcon()
 
         panel = PanelViewController(server: server, store: store)
@@ -39,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.panel.serverChanged()
             self?.updateIcon()
         }
-        _ = panel.view                                   // build the UI now so early updates have somewhere to land
+        _ = panel.view  // build the UI now so early updates have somewhere to land
 
         // whisper.cpp version for the footer (runs git, so off the main thread)
         Task { [weak self] in
@@ -49,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Settings.startServerOnLaunch { server.start() }
 
         popover.contentViewController = panel
-        popover.behavior = .applicationDefined           // we decide when it closes
+        popover.behavior = .applicationDefined  // we decide when it closes
 
         // pkill / Ctrl+C take the normal quit path, so the server dies with the app
         for sig in [SIGTERM, SIGINT, SIGHUP] {
@@ -61,17 +65,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Quit = stop the server first, let the menu bar icon visibly turn off, then exit.
+    /// Every quit path (tile button, right-click menu, Cmd+Q, SIGTERM/SIGINT/SIGHUP) comes through here.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if isShuttingDown { return .terminateLater }  // quit pressed again while waiting
+        guard server.isProcessAlive else { return .terminateNow }
+
+        isShuttingDown = true
+        server.shutDown { [weak self] in
+            // The server is gone and the icon already shows "off". Hold a moment so it's actually seen.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                self?.finishQuit()
+            }
+        }
+        // Safety net: a stuck server must never keep the app from quitting.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self?.server.terminateNow()
+            self?.finishQuit()
+        }
+        return .terminateLater
+    }
+
+    private func finishQuit() {
+        guard !quitReplied else { return }
+        quitReplied = true
+        NSApp.reply(toApplicationShouldTerminate: true)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        server.terminateNow()
+        server.terminateNow()  // no-op if already stopped; belt and braces
     }
 
     // MARK: Menu bar icon
 
     private func updateIcon() {
         let state: MenuBarIcon.State
-        if isRecording { state = .recording }
-        else if server.state == .ready { state = .ready }
-        else { state = .off }
+        if isRecording {
+            state = .recording
+        } else if server.state == .ready {
+            state = .ready
+        } else {
+            state = .off
+        }
         item.button?.image = MenuBarIcon.image(state)
         item.button?.toolTip = "WhisperBar"
     }
@@ -95,14 +132,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
         // A click in ANOTHER app closes the tile (clicks inside our own windows never reach this)
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [
+            .leftMouseDown, .rightMouseDown,
+        ]) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.autoCloseSuspended else { return }
                 self.closePopover()
             }
         }
         // Esc closes the tile (ignored while a dialog is up, so Esc still cancels the dialog)
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] (event: NSEvent) -> NSEvent? in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak self] (event: NSEvent) -> NSEvent? in
             guard event.keyCode == 53 else { return event }
             let handled = MainActor.assumeIsolated { () -> Bool in
                 guard let self, self.popover.isShown, !self.autoCloseSuspended else { return false }
@@ -115,7 +155,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func closePopover() {
         popover.performClose(nil)
-        if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
-        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+        if let m = clickMonitor {
+            NSEvent.removeMonitor(m)
+            clickMonitor = nil
+        }
+        if let m = keyMonitor {
+            NSEvent.removeMonitor(m)
+            keyMonitor = nil
+        }
     }
 }

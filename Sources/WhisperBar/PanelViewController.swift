@@ -1,5 +1,5 @@
-import AppKit
 import AVFoundation
+import AppKit
 
 /// The whole tile: home (server + recorder), history, and the microphone-permission screens.
 @MainActor
@@ -8,7 +8,7 @@ final class PanelViewController: NSViewController {
     enum Screen { case home, history, settings, needsPermission, denied, granted }
 
     // Callbacks into the app
-    var onModalBusy: (@MainActor (Bool) -> Void)?          // true while a system dialog / save panel is up
+    var onModalBusy: (@MainActor (Bool) -> Void)?  // true while a system dialog / save panel is up
     var onRecordingChange: (@MainActor (Bool) -> Void)?
     var onQuit: (@MainActor () -> Void)?
 
@@ -72,10 +72,14 @@ final class PanelViewController: NSViewController {
         self.store = store
         super.init(nibName: nil, bundle: nil)
 
-        recorder.onTick = { [weak self] level, elapsed in self?.tick(level: level, elapsed: elapsed) }
+        recorder.onTick = { [weak self] level, elapsed in self?.tick(level: level, elapsed: elapsed)
+        }
         store.onChange = { [weak self] in self?.storeChanged() }
         exporter.onBusy = { [weak self] busy in self?.onModalBusy?(busy) }
-        exporter.onResult = { [weak self] text in self?.note = text; self?.render() }
+        exporter.onResult = { [weak self] text in
+            self?.note = text
+            self?.render()
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -93,7 +97,9 @@ final class PanelViewController: NSViewController {
         buildDenied()
         buildGranted()
 
-        for s in [homeStack!, historyStack!, settingsStack!, permStack!, deniedStack!, grantedStack!] {
+        for s in [
+            homeStack!, historyStack!, settingsStack!, permStack!, deniedStack!, grantedStack!,
+        ] {
             root.addSubview(s)
             NSLayoutConstraint.activate([
                 s.topAnchor.constraint(equalTo: root.topAnchor),
@@ -107,22 +113,27 @@ final class PanelViewController: NSViewController {
     private func buildHome() {
         // Header: name + status dot ........ power button
         dot.font = .systemFont(ofSize: 9)
-        powerBtn = IconButton(symbol: "power", tooltip: "Start server", side: 30, symbolSize: 15,
-                              target: self, action: #selector(serverTapped))
-        let header = UI.row([UI.label("WhisperBar", size: 15, weight: .semibold), dot, UI.spacer(), powerBtn],
-                            spacing: 6)
+        powerBtn = IconButton(
+            symbol: "power", tooltip: "Start server", side: 30, symbolSize: 15,
+            target: self, action: #selector(serverTapped))
+        let header = UI.row(
+            [UI.label("WhisperBar", size: 15, weight: .semibold), dot, UI.spacer(), powerBtn],
+            spacing: 6)
 
         // Address: localhost:9458 [copy] ........ Open web UI
         let address = UI.label("localhost:\(Config.port)", size: 12, color: .secondaryLabelColor)
-        copyAddressBtn = IconButton(symbol: "doc.on.doc", tooltip: "Copy server address", side: 22, symbolSize: 11,
-                                    target: self, action: #selector(copyAddressTapped))
+        copyAddressBtn = IconButton(
+            symbol: "doc.on.doc", tooltip: "Copy server address", side: 22, symbolSize: 11,
+            target: self, action: #selector(copyAddressTapped))
         openBtn.target = self
         openBtn.action = #selector(openWebUITapped)
         openBtn.isBordered = false
-        openBtn.attributedTitle = NSAttributedString(string: "Open web UI", attributes: [
-            .foregroundColor: NSColor.controlAccentColor,
-            .font: NSFont.systemFont(ofSize: 13),
-        ])
+        openBtn.attributedTitle = NSAttributedString(
+            string: "Open web UI",
+            attributes: [
+                .foregroundColor: NSColor.controlAccentColor,
+                .font: NSFont.systemFont(ofSize: 13),
+            ])
         let addressRow = UI.row([address, copyAddressBtn, UI.spacer(), openBtn], spacing: 4)
 
         // One fixed slot: waveform while recording, text otherwise
@@ -148,40 +159,60 @@ final class PanelViewController: NSViewController {
             message.topAnchor.constraint(equalTo: slot.topAnchor),
         ])
 
-        recBtn = IconButton(symbol: "mic.fill", tooltip: "Record", side: 40, symbolSize: 17,
-                            fill: .controlAccentColor, target: self, action: #selector(recordTapped))
+        recBtn = IconButton(
+            symbol: "mic.fill", tooltip: "Record", side: 40, symbolSize: 17,
+            fill: .controlAccentColor, target: self, action: #selector(recordTapped))
         recBtn.keyEquivalent = "\r"
-        discardBtn = IconButton(symbol: "xmark", tooltip: "Discard recording",
-                                target: self, action: #selector(discardTapped))
-        copyBtn = IconButton(symbol: "doc.on.doc", tooltip: "Copy", target: self, action: #selector(copyTapped))
-        exportBtn = IconButton(symbol: "square.and.arrow.up", tooltip: "Export…",
-                               target: self, action: #selector(exportTapped))
-        historyBtn = IconButton(symbol: "clock.arrow.circlepath", tooltip: "History",
-                                target: self, action: #selector(historyTapped))
+        discardBtn = IconButton(
+            symbol: "xmark", tooltip: "Discard recording",
+            target: self, action: #selector(discardTapped))
+        copyBtn = IconButton(
+            symbol: "doc.on.doc", tooltip: "Copy", target: self, action: #selector(copyTapped))
+        exportBtn = IconButton(
+            symbol: "square.and.arrow.up", tooltip: "Export…",
+            target: self, action: #selector(exportTapped))
+        historyBtn = IconButton(
+            symbol: "clock.arrow.circlepath", tooltip: "History",
+            target: self, action: #selector(historyTapped))
         info.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        info.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let controls = UI.row([recBtn, discardBtn, info, copyBtn, exportBtn, historyBtn], spacing: 6)
+        info.setContentCompressionResistancePriority(
+            NSLayoutConstraint.Priority(1), for: .horizontal)
+        let controls = UI.row(
+            [recBtn, discardBtn, info, copyBtn, exportBtn, historyBtn], spacing: 6)
 
         // Footer: whisper.cpp version ........ log · settings · quit
-        versionLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let logBtn = IconButton(symbol: "doc.text.magnifyingglass", tooltip: "Open server log",
-                                side: 24, symbolSize: 12, target: self, action: #selector(openLogTapped))
-        let settingsBtn = IconButton(symbol: "gearshape", tooltip: "Settings",
-                                     side: 24, symbolSize: 12, target: self, action: #selector(settingsTapped))
-        let quitBtn = IconButton(symbol: "xmark.circle", tooltip: "Quit WhisperBar",
-                                 side: 24, symbolSize: 12, target: self, action: #selector(quitTapped))
+        versionLabel.setContentCompressionResistancePriority(
+            NSLayoutConstraint.Priority(1), for: .horizontal)
+        let logBtn = IconButton(
+            symbol: "doc.text.magnifyingglass", tooltip: "Open server log",
+            side: 24, symbolSize: 12, target: self, action: #selector(openLogTapped))
+        let settingsBtn = IconButton(
+            symbol: "gearshape", tooltip: "Settings",
+            side: 24, symbolSize: 12, target: self, action: #selector(settingsTapped))
+        let quitBtn = IconButton(
+            symbol: "xmark.circle", tooltip: "Quit WhisperBar",
+            side: 24, symbolSize: 12, target: self, action: #selector(quitTapped))
         let footer = UI.row([versionLabel, UI.spacer(), logBtn, settingsBtn, quitBtn], spacing: 4)
 
-        homeStack = UI.column([header, addressRow, UI.separator(), slot, controls, UI.separator(), footer])
+        homeStack = UI.column([
+            header, addressRow, UI.separator(), slot, controls, UI.separator(), footer,
+        ])
     }
 
     private func buildHistory() {
-        let back = IconButton(symbol: "chevron.left", tooltip: "Back", target: self, action: #selector(backTapped))
-        exportAllBtn = IconButton(symbol: "square.and.arrow.up", tooltip: "Export all…",
-                                  target: self, action: #selector(exportAllTapped))
-        clearBtn = IconButton(symbol: "trash", tooltip: "Clear history", target: self, action: #selector(clearTapped))
-        let header = UI.row([back, UI.label("History", size: 15, weight: .semibold), UI.spacer(), exportAllBtn, clearBtn],
-                            spacing: 6)
+        let back = IconButton(
+            symbol: "chevron.left", tooltip: "Back", target: self, action: #selector(backTapped))
+        exportAllBtn = IconButton(
+            symbol: "square.and.arrow.up", tooltip: "Export all…",
+            target: self, action: #selector(exportAllTapped))
+        clearBtn = IconButton(
+            symbol: "trash", tooltip: "Clear history", target: self, action: #selector(clearTapped))
+        let header = UI.row(
+            [
+                back, UI.label("History", size: 15, weight: .semibold), UI.spacer(), exportAllBtn,
+                clearBtn,
+            ],
+            spacing: 6)
 
         historyList.orientation = .vertical
         historyList.alignment = .leading
@@ -222,10 +253,13 @@ final class PanelViewController: NSViewController {
         autoCopySwitch.target = self
         autoCopySwitch.action = #selector(autoCopyToggled)
 
-        let launchRow = UI.row([UI.label("Start server on launch"), UI.spacer(), launchSwitch], spacing: 8)
-        let copyRow = UI.row([UI.label("Copy transcripts automatically"), UI.spacer(), autoCopySwitch], spacing: 8)
+        let launchRow = UI.row(
+            [UI.label("Start server on launch"), UI.spacer(), launchSwitch], spacing: 8)
+        let copyRow = UI.row(
+            [UI.label("Copy transcripts automatically"), UI.spacer(), autoCopySwitch], spacing: 8)
 
-        let folderBtn = NSButton(title: "Show models folder", target: self, action: #selector(showModelsFolderTapped))
+        let folderBtn = NSButton(
+            title: "Show models folder", target: self, action: #selector(showModelsFolderTapped))
         folderBtn.bezelStyle = .rounded
         folderBtn.image = Symbols.image("folder", size: 12)
         folderBtn.imagePosition = .imageLeading
@@ -242,14 +276,18 @@ final class PanelViewController: NSViewController {
             launchRow,
             copyRow,
             UI.separator(),
-            UI.paragraph("Changing the model or language restarts the server.", size: 11, color: .tertiaryLabelColor),
+            UI.paragraph(
+                "Changing the model or language restarts the server.", size: 11,
+                color: .tertiaryLabelColor),
             folderBtn,
         ])
     }
 
     private func backRow(_ title: String) -> NSView {
-        let back = IconButton(symbol: "chevron.left", tooltip: "Back", target: self, action: #selector(backTapped))
-        return UI.row([back, UI.label(title, size: 15, weight: .semibold), UI.spacer()], spacing: 6)
+        let back = IconButton(
+            symbol: "chevron.left", tooltip: "Back", target: self, action: #selector(backTapped))
+        return UI.row(
+            [back, UI.label(title, size: 15, weight: .semibold), UI.spacer()], spacing: 6)
     }
 
     private func buildPermission() {
@@ -260,25 +298,31 @@ final class PanelViewController: NSViewController {
         allowBtn.imagePosition = .imageLeading
         permStack = UI.column([
             backRow("Microphone access"),
-            UI.paragraph("WhisperBar records your voice and sends it to your local whisper server. macOS will ask you to confirm."),
+            UI.paragraph(
+                "WhisperBar records your voice and sends it to your local whisper server. macOS will ask you to confirm."
+            ),
             allowBtn,
         ])
     }
 
     private func buildDenied() {
-        let open = NSButton(title: "Open System Settings", target: self, action: #selector(openSettingsTapped))
+        let open = NSButton(
+            title: "Open System Settings", target: self, action: #selector(openSettingsTapped))
         open.bezelStyle = .rounded
         open.image = Symbols.image("gearshape", size: 12)
         open.imagePosition = .imageLeading
         deniedStack = UI.column([
             backRow("Microphone is off"),
-            UI.paragraph("Turn it on for WhisperBar in System Settings → Privacy & Security → Microphone, then come back."),
+            UI.paragraph(
+                "Turn it on for WhisperBar in System Settings → Privacy & Security → Microphone, then come back."
+            ),
             open,
         ])
     }
 
     private func buildGranted() {
-        let title = UI.label("✓ Microphone access granted", size: 15, weight: .semibold, color: .systemGreen)
+        let title = UI.label(
+            "✓ Microphone access granted", size: 15, weight: .semibold, color: .systemGreen)
         grantedStack = UI.column([title, UI.paragraph("You can start recording now.")])
     }
 
@@ -298,16 +342,27 @@ final class PanelViewController: NSViewController {
         switch server.state {
         case .stopped:
             dot.isHidden = true
-            powerBtn.setTint(.secondaryLabelColor); powerBtn.toolTip = "Start server"; powerBtn.isEnabled = true
+            powerBtn.setTint(.secondaryLabelColor)
+            powerBtn.toolTip = "Start server"
+            powerBtn.isEnabled = true
         case .starting:
-            dot.isHidden = false; dot.textColor = .systemOrange
-            powerBtn.setTint(.systemOrange); powerBtn.toolTip = "Stop server"; powerBtn.isEnabled = true
+            dot.isHidden = false
+            dot.textColor = .systemOrange
+            powerBtn.setTint(.systemOrange)
+            powerBtn.toolTip = "Stop server"
+            powerBtn.isEnabled = true
         case .ready:
-            dot.isHidden = false; dot.textColor = .systemGreen
-            powerBtn.setTint(.systemGreen); powerBtn.toolTip = "Stop server"; powerBtn.isEnabled = true
+            dot.isHidden = false
+            dot.textColor = .systemGreen
+            powerBtn.setTint(.systemGreen)
+            powerBtn.toolTip = "Stop server"
+            powerBtn.isEnabled = true
         case .stopping:
-            dot.isHidden = false; dot.textColor = .systemOrange
-            powerBtn.setTint(.systemOrange); powerBtn.toolTip = "Stopping…"; powerBtn.isEnabled = false
+            dot.isHidden = false
+            dot.textColor = .systemOrange
+            powerBtn.setTint(.systemOrange)
+            powerBtn.toolTip = "Stopping…"
+            powerBtn.isEnabled = false
         }
         openBtn.isEnabled = server.state == .ready
         openBtn.alphaValue = server.state == .ready ? 1 : 0.35
@@ -344,8 +399,11 @@ final class PanelViewController: NSViewController {
                 message.stringValue = problem
                 message.textColor = .systemRed
             } else {
-                message.stringValue = server.state == .ready ? "Press the mic, then speak." : "Start the server (top right) to begin."
-                message.textColor = .secondaryLabelColor
+                switch server.state {
+                case .ready: message.stringValue = "Press the mic, then speak."
+                case .stopping: message.stringValue = "Stopping server…"
+                default: message.stringValue = "Start the server (top right) to begin."
+                }
             }
         }
 
@@ -363,7 +421,8 @@ final class PanelViewController: NSViewController {
         clearBtn.isEnabled = !items.isEmpty
 
         if items.isEmpty {
-            historyList.addArrangedSubview(UI.paragraph("No transcripts yet. Your takes will show up here."))
+            historyList.addArrangedSubview(
+                UI.paragraph("No transcripts yet. Your takes will show up here."))
             return
         }
         for t in items {
@@ -387,19 +446,27 @@ final class PanelViewController: NSViewController {
         }
         current.layoutSubtreeIfNeeded()
         let height = current.fittingSize.height
-        if abs(preferredContentSize.height - height) > 0.5 || preferredContentSize.width != UI.tileWidth {
+        if abs(preferredContentSize.height - height) > 0.5
+            || preferredContentSize.width != UI.tileWidth
+        {
             preferredContentSize = NSSize(width: UI.tileWidth, height: height)
         }
     }
 
-    private func go(_ s: Screen) { screen = s; render() }
+    private func go(_ s: Screen) {
+        screen = s
+        render()
+    }
 
     // MARK: Called by the app
 
     func serverChanged() {
         if server.state == .stopped || server.state == .stopping {
             if recorder.isRecording { discardRecording() }
-            if phase == .transcribing { work?.cancel(); phase = .idle }
+            if phase == .transcribing {
+                work?.cancel()
+                phase = .idle
+            }
         }
         render()
     }
@@ -419,7 +486,10 @@ final class PanelViewController: NSViewController {
     private func storeChanged() {
         if let l = latest, !store.items.contains(where: { $0.id == l.id }) {
             latest = nil
-            if phase == .done { phase = .idle; note = "" }
+            if phase == .done {
+                phase = .idle
+                note = ""
+            }
         }
         render()
     }
@@ -430,7 +500,10 @@ final class PanelViewController: NSViewController {
     @objc private func quitTapped() { onQuit?() }
     @objc private func backTapped() { go(.home) }
     @objc private func historyTapped() { go(.history) }
-    @objc private func settingsTapped() { refreshSettings(); go(.settings) }
+    @objc private func settingsTapped() {
+        refreshSettings()
+        go(.settings)
+    }
 
     @objc private func copyAddressTapped() {
         copyToPasteboard("http://localhost:\(Config.port)")
@@ -442,7 +515,9 @@ final class PanelViewController: NSViewController {
     }
 
     @objc private func openWebUITapped() {
-        if let url = URL(string: "http://localhost:\(Config.port)/") { NSWorkspace.shared.open(url) }
+        if let url = URL(string: "http://localhost:\(Config.port)/") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: Settings
@@ -451,7 +526,9 @@ final class PanelViewController: NSViewController {
         var models = ModelCatalog.scan()
         let current = Settings.modelPath
         if !models.contains(where: { $0.path == current }) {
-            models.insert(ModelInfo(path: current, name: ModelCatalog.displayName(for: current), size: ""), at: 0)
+            models.insert(
+                ModelInfo(path: current, name: ModelCatalog.displayName(for: current), size: ""),
+                at: 0)
         }
         modelPopup.removeAllItems()
         for m in models {
@@ -468,16 +545,20 @@ final class PanelViewController: NSViewController {
     private func refreshLanguage() {
         let englishOnly = ModelCatalog.isEnglishOnly(Settings.modelPath)
         let code = englishOnly ? "en" : Settings.language
-        if let i = Languages.all.firstIndex(where: { $0.code == code }) { languagePopup.selectItem(at: i) }
+        if let i = Languages.all.firstIndex(where: { $0.code == code }) {
+            languagePopup.selectItem(at: i)
+        }
         languagePopup.isEnabled = !englishOnly
         languageHint.isHidden = !englishOnly
-        languageHint.stringValue = "English-only model. Pick one without “.en” in its name for other languages."
+        languageHint.stringValue =
+            "English-only model. Pick one without “.en” in its name for other languages."
         updateSize()
     }
 
     @objc private func modelChanged() {
         guard let path = modelPopup.selectedItem?.representedObject as? String,
-              path != Settings.modelPath else { return }
+            path != Settings.modelPath
+        else { return }
         Settings.modelPath = path
         server.restartIfRunning()
         refreshLanguage()
@@ -485,7 +566,8 @@ final class PanelViewController: NSViewController {
 
     @objc private func languageChanged() {
         guard let code = languagePopup.selectedItem?.representedObject as? String,
-              code != Settings.language else { return }
+            code != Settings.language
+        else { return }
         Settings.language = code
         server.restartIfRunning()
     }
@@ -496,10 +578,14 @@ final class PanelViewController: NSViewController {
     @objc private func showModelsFolderTapped() {
         NSWorkspace.shared.open(URL(fileURLWithPath: Config.modelsDirectory))
     }
-    @objc private func openLogTapped() { NSWorkspace.shared.open(URL(fileURLWithPath: Config.logPath)) }
+    @objc private func openLogTapped() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: Config.logPath))
+    }
 
     @objc private func openSettingsTapped() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+        if let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        {
             NSWorkspace.shared.open(url)
         }
     }
@@ -544,11 +630,14 @@ final class PanelViewController: NSViewController {
     // MARK: Microphone permission
 
     @objc private func recordTapped() {
-        if recorder.isRecording { stopAndTranscribe(); return }
+        if recorder.isRecording {
+            stopAndTranscribe()
+            return
+        }
         guard server.state == .ready, phase != .transcribing else { return }
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: beginRecording()
-        case .notDetermined: go(.needsPermission)          // only ask when the user taps Allow
+        case .notDetermined: go(.needsPermission)  // only ask when the user taps Allow
         default: go(.denied)
         }
     }
@@ -556,7 +645,7 @@ final class PanelViewController: NSViewController {
     @objc private func allowTapped() {
         allowBtn.isEnabled = false
         requestingPermission = true
-        onModalBusy?(true)                                  // keep the tile open behind the system dialog
+        onModalBusy?(true)  // keep the tile open behind the system dialog
 
         Task { [weak self] in
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
@@ -569,7 +658,7 @@ final class PanelViewController: NSViewController {
             if granted {
                 self.go(.granted)
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
-                if self.screen == .granted { self.go(.home) }    // never starts recording by itself
+                if self.screen == .granted { self.go(.home) }  // never starts recording by itself
             } else {
                 self.go(.denied)
             }
@@ -610,7 +699,10 @@ final class PanelViewController: NSViewController {
     private func stopAndTranscribe() {
         let duration = recorder.stop()
         onRecordingChange?(false)
-        if duration < 0.4 { fail("That was too short. Hold on a little longer."); return }
+        if duration < 0.4 {
+            fail("That was too short. Hold on a little longer.")
+            return
+        }
 
         phase = .transcribing
         note = ""
@@ -631,7 +723,10 @@ final class PanelViewController: NSViewController {
 
     private func finish(raw: String, duration: TimeInterval, took: TimeInterval) {
         let text = Self.clean(raw)
-        guard !text.isEmpty else { fail("No speech detected."); return }
+        guard !text.isEmpty else {
+            fail("No speech detected.")
+            return
+        }
 
         let t = store.add(text: text, duration: duration)
         latest = t
@@ -651,7 +746,8 @@ final class PanelViewController: NSViewController {
     /// Collapses whitespace and drops whisper's non-speech markers like [BLANK_AUDIO].
     private static func clean(_ raw: String) -> String {
         let t = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        let wrapped = (t.hasPrefix("[") && t.hasSuffix("]")) || (t.hasPrefix("(") && t.hasSuffix(")"))
+        let wrapped =
+            (t.hasPrefix("[") && t.hasSuffix("]")) || (t.hasPrefix("(") && t.hasSuffix(")"))
         return wrapped && t.count < 40 ? "" : t
     }
 }
