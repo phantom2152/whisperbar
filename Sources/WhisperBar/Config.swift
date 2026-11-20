@@ -15,4 +15,5 @@ enum Config {
     static let port = 9458
     static let logPath = "/tmp/whisperbar.log"
     static let historyLimit = 100
+    static let idleShutdownSeconds: UInt64 = 600  // auto-stop the server after 10 idle minutes
 }

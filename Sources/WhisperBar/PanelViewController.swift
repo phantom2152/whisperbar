@@ -781,6 +781,7 @@ final class PanelViewController: NSViewController {
     private func beginRecording() {
         do {
             try recorder.start()
+            server.setBusy(true)
             phase = .recording
             wave.reset()
             note = "0:00"
@@ -801,6 +802,7 @@ final class PanelViewController: NSViewController {
 
     private func discardRecording() {
         recorder.cancel()
+        server.setBusy(false)
         onRecordingChange?(false)
         phase = .idle
         note = ""
@@ -842,12 +844,14 @@ final class PanelViewController: NSViewController {
         let t = store.add(text: text, duration: duration)
         latest = t
         if Settings.autoCopy { copyToPasteboard(text) }
+        server.setBusy(false)
         phase = .done
         note = String(format: "Done in %.1fs", took) + (Settings.autoCopy ? " · copied" : "")
         render()
     }
 
     private func fail(_ message: String) {
+        server.setBusy(false)
         phase = .failed
         failText = message
         note = ""

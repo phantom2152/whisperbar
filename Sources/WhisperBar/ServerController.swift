@@ -121,11 +121,37 @@ final class ServerController {
         k.waitUntilExit()
     }
 
+    // MARK: Idle auto-shutdown
+
+    private var idleTask: Task<Void, Never>?
+    private var isBusy = false
+
+    /// true when a recording starts; false when the cycle is over (done, failed or discarded).
+    /// The idle countdown is paused while busy and restarts from zero when it ends.
+    func setBusy(_ busy: Bool) {
+        guard state == .ready else { return }
+        isBusy = busy
+        restartIdleTimer()
+    }
+
+    private func restartIdleTimer() {
+        idleTask?.cancel()
+        idleTask = nil
+        guard state == .ready, !isBusy else { return }
+        idleTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Config.idleShutdownSeconds * 1_000_000_000)
+            guard !Task.isCancelled, let self, self.state == .ready, !self.isBusy else { return }
+            self.stop()  // same graceful stop as the power button; UI updates via onChange
+        }
+    }
+
     // MARK: Internals
 
     private func apply(_ s: ServerState, problem p: String? = nil) {
         state = s
         problem = p
+        if s != .ready { isBusy = false }
+        restartIdleTimer()
         onChange?()
     }
 
