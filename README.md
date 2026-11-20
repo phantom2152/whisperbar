@@ -38,3 +38,7 @@ Model, language, start-on-launch and auto-copy: the gear icon in the tile.
     Tools/make_icon.py           regenerates the icons (pip install pillow numpy)
 
 Logs: `/tmp/whisperbar.log` (also behind the log button in the tile).
+
+## License
+
+WhisperBar is licensed under the [MIT License](LICENSE).
